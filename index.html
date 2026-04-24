@@ -8,6 +8,7 @@
 <!-- PWA & iOS App -->
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Quacky Index">
 <meta name="theme-color" content="#0a2e4a">
@@ -611,28 +612,29 @@ function cToF(c) { return c * 9 / 5 + 32; }
 
 async function fetchSST(lat, lon, statusDiv) {
   // Use Open-Meteo Marine API — fast, no auth, hourly SST
-  // Fetch 1 year per request in parallel (API caps ~8,760 rows per call)
+  // Single request for the full range; parallel per-year calls trip the free-tier 429.
   const sstStartYear = 2015;
   const sstEndYear = 2024;
 
   if (statusDiv) statusDiv.innerHTML = `<span class="spinner"></span> Fetching SST data (${sstStartYear}\u2013${sstEndYear})...`;
 
-  const urls = [];
-  for (let y = sstStartYear; y <= sstEndYear; y++) {
-    urls.push(`https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}`
-      + `&hourly=sea_surface_temperature&start_date=${y}-01-01&end_date=${y}-12-31`
-      + `&timeformat=iso8601`);
+  const url = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}`
+    + `&hourly=sea_surface_temperature&start_date=${sstStartYear}-01-01&end_date=${sstEndYear}-12-31`
+    + `&timeformat=iso8601`;
+
+  let data = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(url);
+      if (r.ok) { data = await r.json(); break; }
+      if (r.status === 429) { await new Promise(res => setTimeout(res, 1200 * (attempt + 1))); continue; }
+      break;
+    } catch { break; }
   }
 
-  // Fire all years in parallel
-  const results = await Promise.allSettled(urls.map(url =>
-    fetch(url).then(r => r.ok ? r.json() : null).catch(() => null)
-  ));
-
-  let allDates = [], allSST = [];
-  results.forEach(r => {
-    if (r.status !== 'fulfilled' || !r.value?.hourly) return;
-    const hourly = r.value.hourly;
+  const allDates = [], allSST = [];
+  const hourly = data?.hourly;
+  if (hourly) {
     const times = hourly.time || [];
     const temps = hourly.sea_surface_temperature || [];
     // Sample one reading per day (noon = index 12 of each day) to keep data lean
@@ -642,7 +644,7 @@ async function fetchSST(lat, lon, statusDiv) {
         allSST.push(temps[i]); // Celsius
       }
     }
-  });
+  }
   return { dates: allDates, sst: allSST };
 }
 
@@ -870,32 +872,38 @@ function renderInterpretation(scoredWeeks, thresholdKnots, island, locName, star
     streaks.sort((a, b) => b.length - a.length);
   }
 
-  let html = `<h3>Wind, Pressure &amp; Moon Analysis: ${locName}, ${island}</h3>`;
-  html += `<p>Based on <strong>${years} years</strong> of daily wind &amp; pressure data (${startYear}\u2013${endYear}) combined with <strong>${tripYear} lunar phases</strong>.</p>`;
+  const hasWind = valid.length > 0 && monthSummary.length > 0;
 
-  // Wind overview
-  html += `<p class="section-label">Wind Overview</p>`;
-  html += `<p>Annual avg max daily wind: <strong>${overallAvg.toFixed(1)} kts</strong>. `;
-  html += `Calmest month: <strong>${monthSummary[0].month}</strong> (${monthSummary[0].avg.toFixed(1)} kts). `;
-  html += `Windiest: <strong>${monthSummary[monthSummary.length-1].month}</strong> (${monthSummary[monthSummary.length-1].avg.toFixed(1)} kts).</p>`;
+  let html = `<h3>Fishing Analysis: ${locName}, ${island}</h3>`;
+  html += hasWind
+    ? `<p>Based on <strong>${years} years</strong> of daily wind &amp; pressure data (${startYear}\u2013${endYear}) combined with <strong>${tripYear} lunar phases</strong>.</p>`
+    : `<p>Analysis for <strong>${tripYear}</strong>. Enable the Wind &amp; Pressure layer for historical climate context.</p>`;
 
-  // Pressure overview
-  html += `<p class="section-label">Barometric Pressure Overview</p>`;
-  if (stableWeeks.length > 0) {
+  // Wind overview (only if wind data present)
+  if (hasWind) {
+    html += `<p class="section-label">Wind Overview</p>`;
+    html += `<p>Annual avg max daily wind: <strong>${overallAvg.toFixed(1)} kts</strong>. `;
+    html += `Calmest month: <strong>${monthSummary[0].month}</strong> (${monthSummary[0].avg.toFixed(1)} kts). `;
+    html += `Windiest: <strong>${monthSummary[monthSummary.length-1].month}</strong> (${monthSummary[monthSummary.length-1].avg.toFixed(1)} kts).</p>`;
+
+    // Pressure overview
+    html += `<p class="section-label">Barometric Pressure Overview</p>`;
+  }
+  if (hasWind && stableWeeks.length > 0) {
     html += `<p><strong>${stableWeeks.length} weeks</strong> have historically stable pressure (std dev &lt; 3 mb), meaning fewer fronts and more consistent fishing. `;
     html += `The most stable weeks are: `;
     html += stableWeeks.slice(0, 5).map(w => `<span class="highlight-week">Wk ${w.week} (${weekDateRange(w.week)})</span>`).join(', ');
     html += `.</p>`;
   }
-  if (unstableWeeks.length > 0) {
+  if (hasWind && unstableWeeks.length > 0) {
     html += `<p><strong>${unstableWeeks.length} weeks</strong> show high pressure volatility (std dev &gt; 5 mb) \u2014 frequent fronts. `;
     html += `These can produce pre-front feeding windows but also blown-out days. Worst: `;
     html += unstableWeeks.slice(0, 3).map(w => `<span class="caution">Wk ${w.week} (${weekDateRange(w.week)})</span>`).join(', ');
     html += `.</p>`;
   }
 
-  // SST overview
-  const sstValid = valid.filter(w => w.sstAvgF !== null);
+  // SST overview (independent of wind — scoredWeeks always contains all 52 weeks)
+  const sstValid = scoredWeeks.filter(w => w.sstAvgF !== null);
   if (sstValid.length > 0) {
     html += `<p class="section-label">Water Temperature &amp; Species Activity</p>`;
     const grandSlamWeeks = sstValid.filter(w => w.sstGrandSlam).sort((a,b) => a.week - b.week);
@@ -919,6 +927,7 @@ function renderInterpretation(scoredWeeks, thresholdKnots, island, locName, star
     }
   }
 
+  if (hasWind) {
   // Weeks below threshold
   html += `<p class="section-label">Weeks Below ${thresholdKnots} Knots</p>`;
   if (belowThreshold.length === 0) {
@@ -988,6 +997,7 @@ function renderInterpretation(scoredWeeks, thresholdKnots, island, locName, star
   // Method
   html += `<p class="section-label">Scoring Method</p>`;
   html += `<p style="font-size:0.8rem;color:var(--gray-600)">Fishing Score = <strong>60% wind</strong> (calmest = 100) + <strong>20% moon/tide</strong> (new/full = 100, quarter = 20) + <strong>20% pressure stability</strong> (lowest std dev = 100). Spring tides push water across flats. Stable high pressure = consistent fishing; falling pressure = pre-front bite then lockjaw.</p>`;
+  } // end hasWind
 
   panel.innerHTML = html;
 }
