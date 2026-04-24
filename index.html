@@ -691,8 +691,19 @@ async function fetchData(lat, lon, startYear, endYear) {
       + `&start_date=${y}-01-01&end_date=${yEnd}-12-31`
       + `&daily=wind_speed_10m_max,wind_gusts_10m_max,surface_pressure_mean`
       + `&wind_speed_unit=kmh&timezone=America%2FNassau`;
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`API error: ${resp.status} ${resp.statusText}`);
+
+    // Retry on 429 with exponential backoff — Open-Meteo throttles shared IPs aggressively
+    let resp = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      resp = await fetch(url);
+      if (resp.ok) break;
+      if (resp.status === 429 && attempt < 3) {
+        await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+        continue;
+      }
+      break;
+    }
+    if (!resp || !resp.ok) throw new Error(`API error: ${resp?.status || '?'} ${resp?.statusText || ''}`.trim());
     const data = await resp.json();
     if (data.error) throw new Error(data.reason || data.error);
     allDates.push(...(data.daily.time || []));
