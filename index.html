@@ -616,6 +616,10 @@ async function fetchSST(lat, lon, statusDiv) {
   const sstStartYear = 2015;
   const sstEndYear = 2024;
 
+  const cacheKey = `quacky:sst:${lat.toFixed(3)}:${lon.toFixed(3)}:${sstStartYear}-${sstEndYear}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return cached;
+
   if (statusDiv) statusDiv.innerHTML = `<span class="spinner"></span> Fetching SST data (${sstStartYear}\u2013${sstEndYear})...`;
 
   const url = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}`
@@ -645,7 +649,9 @@ async function fetchSST(lat, lon, statusDiv) {
       }
     }
   }
-  return { dates: allDates, sst: allSST };
+  const result = { dates: allDates, sst: allSST };
+  if (result.dates.length > 0) cacheSet(cacheKey, result);
+  return result;
 }
 
 function processSST(rawSST) {
@@ -680,8 +686,36 @@ function processSST(rawSST) {
   return sstWeeks;
 }
 
+// ── localStorage response cache ────────────────────────────────
+// Historical weather doesn't change — cache for 30 days to avoid re-hitting
+// Open-Meteo's free-tier rate limits on repeat queries for the same location.
+const CACHE_TTL = 1000 * 60 * 60 * 24 * 30;
+function cacheGet(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const { t, v } = JSON.parse(raw);
+    if (Date.now() - t > CACHE_TTL) { localStorage.removeItem(key); return null; }
+    return v;
+  } catch { return null; }
+}
+function cacheSet(key, v) {
+  const payload = JSON.stringify({ t: Date.now(), v });
+  try { localStorage.setItem(key, payload); }
+  catch {
+    // Quota exceeded — evict all quacky entries and try once more
+    Object.keys(localStorage).filter(k => k.startsWith('quacky:')).forEach(k => localStorage.removeItem(k));
+    try { localStorage.setItem(key, payload); } catch {}
+  }
+}
+function isRateLimit(err) { return /\b429\b/.test(err?.message || ''); }
+
 // ── Fetch Data (Wind + Pressure) ───────────────────────────────
 async function fetchData(lat, lon, startYear, endYear) {
+  const cacheKey = `quacky:wind:${lat.toFixed(3)}:${lon.toFixed(3)}:${startYear}-${endYear}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return cached;
+
   const batchSize = 30;
   let allDates = [], allWind = [], allGusts = [], allPressure = [];
 
@@ -711,7 +745,9 @@ async function fetchData(lat, lon, startYear, endYear) {
     allGusts.push(...(data.daily.wind_gusts_10m_max || []));
     allPressure.push(...(data.daily.surface_pressure_mean || []));
   }
-  return { dates: allDates, wind: allWind, gusts: allGusts, pressure: allPressure };
+  const result = { dates: allDates, wind: allWind, gusts: allGusts, pressure: allPressure };
+  cacheSet(cacheKey, result);
+  return result;
 }
 
 // ── Process Data ───────────────────────────────────────────────
@@ -1500,7 +1536,11 @@ analyzeBtn.addEventListener('click', async () => {
     resultsDiv.style.display = 'block';
   } catch (err) {
     statusDiv.className = 'error';
-    statusDiv.textContent = `Error: ${err.message}`;
+    if (isRateLimit(err)) {
+      statusDiv.innerHTML = `Open-Meteo is temporarily rate-limiting this connection (HTTP 429). Try a shorter year range, wait a few minutes, or pick a location you've already queried (cached for 30 days).`;
+    } else {
+      statusDiv.textContent = `Error: ${err.message}`;
+    }
     console.error(err);
   } finally {
     analyzeBtn.disabled = false;

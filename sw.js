@@ -1,4 +1,4 @@
-const CACHE = 'quacky-v3';
+const CACHE = 'quacky-v4';
 const ASSETS = ['/', '/index.html'];
 
 self.addEventListener('install', e => {
