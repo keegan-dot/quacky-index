@@ -1,0 +1,1527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>The Quacky Index</title>
+
+<!-- PWA & iOS App -->
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Quacky Index">
+<meta name="theme-color" content="#0a2e4a">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="description" content="Find the best fishing weeks in the Bahamas using historical wind, pressure, water temp & moon data">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.1.0/dist/chartjs-plugin-annotation.min.js"></script>
+<style>
+  :root {
+    --ocean: #0a2e4a;
+    --sand: #f5f0e8;
+    --teal: #1a8a8a;
+    --teal-light: #2cb5b5;
+    --coral: #e8734a;
+    --white: #ffffff;
+    --gray-100: #f7f7f7;
+    --gray-200: #e5e5e5;
+    --gray-400: #aaa;
+    --gray-600: #666;
+    --gray-800: #333;
+    --gold: #d4a843;
+    --purple: #7c5cbf;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--sand); color: var(--gray-800); min-height: 100vh;
+  }
+
+  header {
+    background: linear-gradient(135deg, var(--ocean), #0d3d66);
+    color: var(--white); padding: 24px 32px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  }
+  header h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; }
+  header p  { margin-top: 4px; font-size: 0.9rem; opacity: 0.75; }
+
+  .controls {
+    background: var(--white); padding: 20px 32px;
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;
+    border-bottom: 1px solid var(--gray-200); box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  }
+  .control-group { display: flex; flex-direction: column; gap: 4px; }
+  .control-group label {
+    font-size: 0.75rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-600);
+  }
+  .control-group select, .control-group input {
+    padding: 8px 12px; border: 1px solid var(--gray-200); border-radius: 6px;
+    font-size: 0.9rem; background: var(--gray-100); color: var(--gray-800); min-width: 160px;
+  }
+  .control-group select:focus, .control-group input:focus {
+    outline: none; border-color: var(--teal); box-shadow: 0 0 0 2px rgba(26,138,138,0.15);
+  }
+
+  button#analyze {
+    padding: 8px 24px; background: var(--teal); color: var(--white);
+    border: none; border-radius: 6px; font-size: 0.9rem; font-weight: 600;
+    cursor: pointer; transition: background 0.2s; height: 38px;
+  }
+  button#analyze:hover { background: var(--teal-light); }
+  button#analyze:disabled { background: var(--gray-400); cursor: not-allowed; }
+
+  .main-content { max-width: 1200px; margin: 0 auto; padding: 24px 32px; }
+
+  #status { text-align: center; padding: 40px; font-size: 1rem; color: var(--gray-600); }
+  #status.error { color: var(--coral); font-weight: 600; }
+
+  .spinner {
+    display: inline-block; width: 24px; height: 24px;
+    border: 3px solid var(--gray-200); border-top-color: var(--teal);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    vertical-align: middle; margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Top-5 cards */
+  .top5 {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px; margin-bottom: 24px;
+  }
+  .top5-card {
+    background: var(--white); border-radius: 10px; padding: 16px;
+    text-align: center; box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+    border-top: 3px solid var(--teal);
+  }
+  .top5-card.rank-1 { border-top-color: var(--gold); }
+  .top5-card .rank  { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--gray-400); margin-bottom: 4px; }
+  .top5-card .dates { font-size: 1rem; font-weight: 700; color: var(--ocean); }
+  .top5-card .wind  { font-size: 0.85rem; color: var(--teal); margin-top: 4px; }
+  .top5-card .extra { font-size: 0.8rem; color: var(--gray-600); margin-top: 2px; }
+  .top5-card .score-badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-weight: 700; font-size: 0.85rem; margin-top: 6px; }
+
+  /* Charts */
+  .chart-container {
+    background: var(--white); border-radius: 10px; padding: 20px;
+    margin-bottom: 24px; box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+    position: relative; height: 380px;
+  }
+  .chart-container h4 {
+    font-size: 0.8rem; color: var(--gray-600); text-transform: uppercase;
+    letter-spacing: 0.04em; margin-bottom: 8px;
+  }
+
+  /* Moon strip */
+  .moon-strip {
+    background: var(--white); border-radius: 10px; padding: 12px 20px;
+    margin-bottom: 24px; box-shadow: 0 1px 6px rgba(0,0,0,0.08); overflow-x: auto;
+  }
+  .moon-strip h4 { font-size: 0.8rem; color: var(--gray-600); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .moon-strip .strip-row { display: flex; gap: 0; min-width: max-content; }
+  .moon-strip .moon-cell { flex: 0 0 calc(100% / 52); min-width: 20px; text-align: center; font-size: 0.7rem; line-height: 1.2; }
+  .moon-strip .moon-icon { font-size: 1.1rem; }
+  .moon-strip .moon-label { font-size: 0.55rem; color: var(--gray-600); white-space: nowrap; }
+  .moon-strip .tide-label { font-size: 0.55rem; font-weight: 700; margin-top: 1px; }
+  .moon-strip .tide-spring { color: var(--gold); }
+  .moon-strip .tide-neap { color: var(--gray-400); }
+
+  /* Table */
+  .table-container {
+    background: var(--white); border-radius: 10px; overflow: hidden;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.08); margin-bottom: 32px;
+  }
+  .table-container h3 { padding: 16px 20px 12px; font-size: 0.95rem; color: var(--ocean); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  thead th {
+    background: var(--gray-100); padding: 10px 10px; text-align: left;
+    font-weight: 600; color: var(--gray-600); text-transform: uppercase;
+    font-size: 0.6rem; letter-spacing: 0.05em; cursor: pointer;
+    user-select: none; white-space: nowrap;
+  }
+  thead th:hover { color: var(--teal); }
+  thead th .sort-arrow { margin-left: 3px; font-size: 0.55rem; }
+  tbody tr { border-top: 1px solid var(--gray-200); }
+  tbody tr:hover { background: rgba(26,138,138,0.04); }
+  tbody tr.top5-row { background: rgba(26,138,138,0.06); }
+  tbody tr.prime-row { background: rgba(212,168,67,0.08); }
+  tbody td { padding: 8px 10px; white-space: nowrap; }
+
+  .fishable-bar { display: inline-block; height: 6px; border-radius: 3px; background: var(--teal); vertical-align: middle; margin-right: 5px; }
+  .score-sm { display: inline-block; padding: 1px 7px; border-radius: 10px; font-weight: 700; font-size: 0.72rem; color: var(--white); }
+  .tide-badge { display: inline-block; padding: 1px 5px; border-radius: 4px; font-size: 0.68rem; font-weight: 600; }
+  .tide-badge.spring { background: rgba(212,168,67,0.15); color: #9a7a1f; }
+  .tide-badge.neap   { background: rgba(170,170,170,0.15); color: #777; }
+  .pressure-badge { display: inline-block; padding: 1px 5px; border-radius: 4px; font-size: 0.68rem; font-weight: 600; }
+  .pressure-badge.stable { background: rgba(26,138,138,0.12); color: #1a8a8a; }
+  .pressure-badge.moderate { background: rgba(212,168,67,0.15); color: #9a7a1f; }
+  .pressure-badge.unstable { background: rgba(232,115,74,0.12); color: #c0392b; }
+
+  .species-badge { display: inline-block; padding: 1px 4px; border-radius: 3px; font-size: 0.6rem; font-weight: 700; margin-right: 2px; }
+  .species-badge.bone { background: rgba(26,138,138,0.15); color: #1a8a8a; }
+  .species-badge.tarpon { background: rgba(124,92,191,0.15); color: #7c5cbf; }
+  .species-badge.permit { background: rgba(212,168,67,0.15); color: #9a7a1f; }
+  .species-badge.slam { background: rgba(212,168,67,0.25); color: #9a7a1f; border: 1px solid rgba(212,168,67,0.4); }
+
+  /* Interpretation panel */
+  .interpretation {
+    background: var(--white); border-radius: 10px; padding: 24px;
+    margin-bottom: 24px; box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+    border-left: 4px solid var(--teal);
+  }
+  .interpretation h3 { font-size: 1rem; color: var(--ocean); margin-bottom: 12px; }
+  .interpretation p, .interpretation li { font-size: 0.9rem; line-height: 1.6; color: var(--gray-800); }
+  .interpretation ul { margin: 8px 0 12px 20px; }
+  .interpretation li { margin-bottom: 4px; }
+  .interpretation .highlight-week {
+    display: inline-block; background: rgba(26,138,138,0.1);
+    border: 1px solid rgba(26,138,138,0.25); border-radius: 4px;
+    padding: 1px 6px; font-weight: 600; color: var(--teal); white-space: nowrap;
+  }
+  .interpretation .prime-week {
+    display: inline-block; background: rgba(212,168,67,0.12);
+    border: 1px solid rgba(212,168,67,0.3); border-radius: 4px;
+    padding: 1px 6px; font-weight: 600; color: #9a7a1f; white-space: nowrap;
+  }
+  .interpretation .section-label {
+    font-weight: 700; color: var(--ocean); margin-top: 12px; margin-bottom: 4px;
+    font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .interpretation .caution { color: var(--coral); font-weight: 600; }
+
+  /* Toggle switches */
+  .toggle-bar {
+    background: var(--white); padding: 12px 32px;
+    display: flex; flex-wrap: wrap; gap: 20px; align-items: center;
+    border-bottom: 1px solid var(--gray-200);
+  }
+  .toggle-bar .toggle-label {
+    font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--gray-600); margin-right: 4px;
+  }
+  .toggle-group { display: flex; align-items: center; gap: 8px; }
+  .toggle-group .tg-name { font-size: 0.8rem; font-weight: 600; color: var(--gray-800); }
+  .toggle-group .tg-note { font-size: 0.65rem; color: var(--gray-400); }
+
+  .switch {
+    position: relative; display: inline-block; width: 36px; height: 20px;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .slider {
+    position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--gray-200); border-radius: 20px; transition: 0.3s;
+  }
+  .switch .slider:before {
+    content: ''; position: absolute; height: 14px; width: 14px;
+    left: 3px; bottom: 3px; background: var(--white); border-radius: 50%; transition: 0.3s;
+  }
+  .switch input:checked + .slider { background: var(--teal); }
+  .switch input:checked + .slider:before { transform: translateX(16px); }
+
+  /* Music player */
+  .music-player {
+    position: fixed; bottom: 16px; right: 16px; z-index: 1000;
+    background: var(--ocean); border-radius: 10px; padding: 8px 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3); display: flex; align-items: center; gap: 8px;
+    cursor: pointer; transition: opacity 0.3s;
+  }
+  .music-player:hover { opacity: 0.9; }
+  .music-player .music-icon { font-size: 1.1rem; }
+  .music-player .music-label { color: var(--white); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.03em; }
+  .music-player iframe {
+    position: absolute; width: 1px; height: 1px; opacity: 0.01;
+    pointer-events: none; bottom: 0; left: 0;
+  }
+
+  footer { text-align: center; padding: 16px; font-size: 0.75rem; color: var(--gray-400); }
+
+  @media (max-width: 768px) {
+    .controls { padding: 16px; gap: 12px; }
+    .main-content { padding: 16px; }
+    .chart-container { height: 300px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>The Quacky Index</h1>
+  <p>Historical wind, pressure, water temp &amp; moon/tide data to find the best weeks for fishing</p>
+</header>
+
+<div class="controls">
+  <div class="control-group">
+    <label>Island</label>
+    <select id="island"></select>
+  </div>
+  <div class="control-group">
+    <label>Location</label>
+    <select id="location"></select>
+  </div>
+  <div class="control-group">
+    <label>Wind Data Start</label>
+    <input type="number" id="startYear" value="1975" min="1950" max="2025" style="width:80px">
+  </div>
+  <div class="control-group">
+    <label>Wind Data End</label>
+    <input type="number" id="endYear" value="2025" min="1950" max="2025" style="width:80px">
+  </div>
+  <div class="control-group">
+    <label>Trip Year</label>
+    <select id="tripYear" style="min-width:80px">
+      <option value="2025">2025</option>
+      <option value="2026" selected>2026</option>
+      <option value="2027">2027</option>
+      <option value="2028">2028</option>
+      <option value="2029">2029</option>
+      <option value="2030">2030</option>
+    </select>
+  </div>
+  <div class="control-group">
+    <label>Threshold (knots)</label>
+    <input type="number" id="threshold" value="12" min="1" max="50" step="1" style="width:80px">
+  </div>
+  <button id="analyze">Analyze</button>
+</div>
+
+<div class="toggle-bar">
+  <span class="toggle-label">Data Layers:</span>
+  <div class="toggle-group">
+    <label class="switch"><input type="checkbox" id="toggleWind" checked><span class="slider"></span></label>
+    <span class="tg-name">Wind &amp; Pressure</span>
+    <span class="tg-note">(Open-Meteo, fast)</span>
+  </div>
+  <div class="toggle-group">
+    <label class="switch"><input type="checkbox" id="toggleSST"><span class="slider"></span></label>
+    <span class="tg-name">Water Temp</span>
+    <span class="tg-note">(Open-Meteo Marine, fast)</span>
+  </div>
+  <div class="toggle-group">
+    <label class="switch"><input type="checkbox" id="toggleMoon" checked><span class="slider"></span></label>
+    <span class="tg-name">Moon &amp; Tides</span>
+    <span class="tg-note">(calculated, instant)</span>
+  </div>
+</div>
+
+<div class="main-content">
+  <div id="status">Select an island and location, then click <strong>Analyze</strong> to fetch historical wind data.</div>
+
+  <div id="results" style="display:none;">
+    <div id="interpretation" class="interpretation"></div>
+    <div id="top5Container" class="top5"></div>
+    <div id="windSection">
+      <div class="chart-container">
+        <h4>Weekly Average Max Wind Speed (Historical)</h4>
+        <canvas id="windChart"></canvas>
+      </div>
+      <div class="chart-container">
+        <h4>Weekly Barometric Pressure Stability (Historical) &mdash; Lower = More Stable = Better Fishing</h4>
+        <canvas id="pressureChart"></canvas>
+      </div>
+    </div>
+    <div id="sstSection" style="display:none">
+      <div class="chart-container" style="height:420px">
+        <h4>Weekly Sea Surface Temperature (2015&ndash;2024) &mdash; Species Feeding Zones</h4>
+        <canvas id="sstChart"></canvas>
+      </div>
+    </div>
+    <div id="moonSection">
+      <div id="moonStripContainer" class="moon-strip"></div>
+    </div>
+    <div class="table-container">
+      <h3 id="tableTitle">All 52 Weeks &mdash; Ranked by Fishing Score</h3>
+      <div style="overflow-x:auto;">
+        <table id="weekTable">
+          <thead>
+            <tr>
+              <th data-col="score">Score <span class="sort-arrow"></span></th>
+              <th data-col="rank">Wind Rank <span class="sort-arrow"></span></th>
+              <th data-col="week">Wk # <span class="sort-arrow"></span></th>
+              <th data-col="dates">Dates <span class="sort-arrow"></span></th>
+              <th data-col="avg">Wind (kts) <span class="sort-arrow"></span></th>
+              <th data-col="gust">Gust (kts) <span class="sort-arrow"></span></th>
+              <th data-col="fishable">% Fishable <span class="sort-arrow"></span></th>
+              <th data-col="pressureStability">Pressure <span class="sort-arrow"></span></th>
+              <th data-col="fronts">Fronts/Yr <span class="sort-arrow"></span></th>
+              <th data-col="sst">SST (&deg;F) <span class="sort-arrow"></span></th>
+              <th data-col="species">Species <span class="sort-arrow"></span></th>
+              <th data-col="moon">Moon <span class="sort-arrow"></span></th>
+              <th data-col="tide">Tide <span class="sort-arrow"></span></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="music-player" id="musicPlayer" title="Click to play music">
+  <span class="music-icon" id="musicIcon">&#127925;</span>
+  <select id="stationPicker" title="Choose a station" onclick="event.stopPropagation()" style="
+    background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.25);
+    border-radius:5px;padding:3px 6px;font-size:0.68rem;font-weight:600;
+    cursor:pointer;outline:none;max-width:200px;
+  ">
+    <option value="2nFl0qBzGb0" style="color:#333">Marley + Peter Tosh + Cliff</option>
+    <option value="G1SY_uKVWcs" style="color:#333">Jimmy Buffett Hits</option>
+    <option value="dLoQAGLGeao" style="color:#333">Best of Peter Tosh</option>
+    <option value="1EAwUzbdiB8" style="color:#333">Bob Marley Greatest Hits</option>
+    <option value="cd62yq9VvBI" style="color:#333">Reggae Mix - Marley, Cliff, Dube</option>
+    <option value="efEoRZ13bW0" style="color:#333">Island Vibes (Original)</option>
+  </select>
+  <span class="music-label" id="musicLabel">Play</span>
+  <iframe id="ytPlayer" width="1" height="1" allow="autoplay" src=""></iframe>
+</div>
+
+<footer>
+  Wind &amp; Pressure: Open-Meteo (ERA5) &middot; SST: Open-Meteo Marine &middot; Moon: Synodic calc &middot; Tides: Spring/neap from lunar phase
+</footer>
+
+<script>
+// ── Location Database ──────────────────────────────────────────
+const ISLANDS = {
+  "Abaco": [
+    { name: "Marsh Harbour", lat: 26.54, lon: -77.06 },
+    { name: "Treasure Cay", lat: 26.67, lon: -77.28 },
+    { name: "Cherokee Sound", lat: 26.32, lon: -77.07 },
+    { name: "Sandy Point", lat: 26.01, lon: -77.40 }
+  ],
+  "Acklins": [
+    { name: "Spring Point", lat: 22.44, lon: -73.97 },
+    { name: "Lovely Bay", lat: 22.55, lon: -73.93 },
+    { name: "Snug Corner", lat: 22.30, lon: -74.05 }
+  ],
+  "Andros": [
+    { name: "Fresh Creek (Andros Town)", lat: 24.71, lon: -77.77 },
+    { name: "Congo Town", lat: 24.16, lon: -77.59 },
+    { name: "Behring Point", lat: 24.77, lon: -77.85 },
+    { name: "Mangrove Cay", lat: 24.38, lon: -77.73 }
+  ],
+  "Berry Islands": [
+    { name: "Great Harbour Cay", lat: 25.75, lon: -77.84 },
+    { name: "Chub Cay", lat: 25.41, lon: -77.88 }
+  ],
+  "Bimini": [
+    { name: "Alice Town (North Bimini)", lat: 25.73, lon: -79.29 },
+    { name: "South Bimini", lat: 25.69, lon: -79.27 }
+  ],
+  "Cat Island": [
+    { name: "Arthur's Town", lat: 24.63, lon: -75.67 },
+    { name: "New Bight", lat: 24.31, lon: -75.45 },
+    { name: "Orange Creek", lat: 24.67, lon: -75.65 }
+  ],
+  "Crooked Island": [
+    { name: "Colonel Hill", lat: 22.75, lon: -74.14 },
+    { name: "Landrail Point", lat: 22.79, lon: -74.18 }
+  ],
+  "Eleuthera": [
+    { name: "Governor's Harbour", lat: 25.20, lon: -76.24 },
+    { name: "Rock Sound", lat: 24.89, lon: -76.17 },
+    { name: "Harbour Island", lat: 25.50, lon: -76.63 },
+    { name: "Spanish Wells", lat: 25.55, lon: -76.76 }
+  ],
+  "Exuma": [
+    { name: "George Town", lat: 23.52, lon: -75.79 },
+    { name: "Staniel Cay", lat: 24.17, lon: -76.44 },
+    { name: "Barraterre", lat: 23.78, lon: -76.11 },
+    { name: "Black Point", lat: 24.10, lon: -76.40 }
+  ],
+  "Grand Bahama": [
+    { name: "Freeport", lat: 26.53, lon: -78.70 },
+    { name: "West End", lat: 26.69, lon: -78.98 },
+    { name: "McLean's Town", lat: 26.63, lon: -78.02 },
+    { name: "Sweeting's Cay", lat: 26.61, lon: -77.87 }
+  ],
+  "Inagua": [
+    { name: "Matthew Town", lat: 20.95, lon: -73.67 },
+    { name: "Northwest Point", lat: 21.14, lon: -73.70 }
+  ],
+  "Long Island": [
+    { name: "Stella Maris", lat: 23.58, lon: -75.27 },
+    { name: "Clarence Town", lat: 23.10, lon: -74.98 },
+    { name: "Deadman's Cay", lat: 23.16, lon: -75.10 },
+    { name: "Cape Santa Maria", lat: 23.67, lon: -75.34 }
+  ],
+  "Mayaguana": [
+    { name: "Abraham's Bay", lat: 22.37, lon: -73.01 },
+    { name: "Pirates Well", lat: 22.43, lon: -73.05 }
+  ],
+  "Nassau / New Providence": [
+    { name: "Nassau", lat: 25.05, lon: -77.35 },
+    { name: "South Ocean", lat: 24.99, lon: -77.53 },
+    { name: "Clifton Point", lat: 25.00, lon: -77.57 }
+  ],
+  "Ragged Island": [ { name: "Duncan Town", lat: 22.19, lon: -75.73 } ],
+  "Rum Cay": [ { name: "Port Nelson", lat: 23.64, lon: -74.84 } ],
+  "San Salvador": [
+    { name: "Cockburn Town", lat: 24.05, lon: -74.53 },
+    { name: "Riding Rock Point", lat: 24.01, lon: -74.55 }
+  ]
+};
+
+// ── DOM refs ───────────────────────────────────────────────────
+const islandSel   = document.getElementById('island');
+const locationSel = document.getElementById('location');
+const startYearIn = document.getElementById('startYear');
+const endYearIn   = document.getElementById('endYear');
+const tripYearSel = document.getElementById('tripYear');
+const thresholdIn = document.getElementById('threshold');
+const analyzeBtn  = document.getElementById('analyze');
+const statusDiv   = document.getElementById('status');
+const resultsDiv  = document.getElementById('results');
+const top5Cont    = document.getElementById('top5Container');
+const tbody       = document.querySelector('#weekTable tbody');
+let windChart = null;
+let pressureChart = null;
+let sstChart = null;
+const toggleWind = document.getElementById('toggleWind');
+const toggleSST  = document.getElementById('toggleSST');
+const toggleMoon = document.getElementById('toggleMoon');
+
+// ── Species Temperature Preferences (°F) ──────────────────────
+const SPECIES = {
+  bonefish: { name: 'Bonefish', short: 'Bone', cls: 'bone', preferred: [75, 85], optimal: [78, 82] },
+  tarpon:   { name: 'Tarpon',   short: 'Tarp', cls: 'tarpon', preferred: [75, 90], optimal: [80, 88] },
+  permit:   { name: 'Permit',   short: 'Perm', cls: 'permit', preferred: [72, 86], optimal: [75, 82] }
+};
+const GRAND_SLAM = [78, 82]; // All three optimal overlap
+
+// ── Populate island dropdown ───────────────────────────────────
+Object.keys(ISLANDS).forEach(island => {
+  const opt = document.createElement('option');
+  opt.value = island; opt.textContent = island;
+  islandSel.appendChild(opt);
+});
+
+function updateLocations() {
+  locationSel.innerHTML = '';
+  (ISLANDS[islandSel.value] || []).forEach(loc => {
+    const opt = document.createElement('option');
+    opt.value = JSON.stringify({ lat: loc.lat, lon: loc.lon });
+    opt.textContent = loc.name;
+    locationSel.appendChild(opt);
+  });
+}
+islandSel.addEventListener('change', updateLocations);
+updateLocations();
+islandSel.value = 'Acklins';
+updateLocations();
+
+// ── Unit helpers ───────────────────────────────────────────────
+function kmhToKnots(kmh) { return kmh * 0.539957; }
+function knotsToMph(kts) { return kts * 1.15078; }
+
+// ── ISO week helpers ───────────────────────────────────────────
+function getISOWeek(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+function weekDateRange(week) {
+  const jan1 = new Date(Date.UTC(2024, 0, 1));
+  const dayOfWeek = jan1.getUTCDay() || 7;
+  const firstMonday = new Date(jan1);
+  firstMonday.setUTCDate(jan1.getUTCDate() + (1 - dayOfWeek));
+  const start = new Date(firstMonday);
+  start.setUTCDate(firstMonday.getUTCDate() + (week - 1) * 7);
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+  const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${m[start.getUTCMonth()]} ${start.getUTCDate()}\u2013${m[end.getUTCMonth()]} ${end.getUTCDate()}`;
+}
+
+function weekStartDate(year, week) {
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const dayOfWeek = jan4.getUTCDay() || 7;
+  const isoWeek1Monday = new Date(jan4);
+  isoWeek1Monday.setUTCDate(jan4.getUTCDate() - dayOfWeek + 1);
+  const target = new Date(isoWeek1Monday);
+  target.setUTCDate(isoWeek1Monday.getUTCDate() + (week - 1) * 7);
+  return target;
+}
+
+// ── Moon Phase Algorithm ───────────────────────────────────────
+const SYNODIC = 29.53058770576;
+const REF_NEW_MOON = Date.UTC(2000, 0, 6, 18, 14, 0);
+
+function getMoonAge(date) {
+  const diffDays = (date.getTime() - REF_NEW_MOON) / 86400000;
+  let age = diffDays % SYNODIC;
+  if (age < 0) age += SYNODIC;
+  return age;
+}
+
+function getMoonPhase(date) {
+  const age = getMoonAge(date);
+  const f = age / SYNODIC;
+  if (f < 0.0625)  return { name: 'New Moon',        icon: '\uD83C\uDF11', shortName: 'New',   primeScore: 1.0 };
+  if (f < 0.1875)  return { name: 'Waxing Crescent', icon: '\uD83C\uDF12', shortName: 'WxCr',  primeScore: 0.6 };
+  if (f < 0.3125)  return { name: 'First Quarter',   icon: '\uD83C\uDF13', shortName: '1st Q', primeScore: 0.2 };
+  if (f < 0.4375)  return { name: 'Waxing Gibbous',  icon: '\uD83C\uDF14', shortName: 'WxGb',  primeScore: 0.5 };
+  if (f < 0.5625)  return { name: 'Full Moon',       icon: '\uD83C\uDF15', shortName: 'Full',  primeScore: 1.0 };
+  if (f < 0.6875)  return { name: 'Waning Gibbous',  icon: '\uD83C\uDF16', shortName: 'WnGb',  primeScore: 0.5 };
+  if (f < 0.8125)  return { name: 'Last Quarter',    icon: '\uD83C\uDF17', shortName: 'Last Q',primeScore: 0.2 };
+  if (f < 0.9375)  return { name: 'Waning Crescent', icon: '\uD83C\uDF18', shortName: 'WnCr',  primeScore: 0.6 };
+  return { name: 'New Moon', icon: '\uD83C\uDF11', shortName: 'New', primeScore: 1.0 };
+}
+
+function getTideType(date) {
+  const age = getMoonAge(date);
+  const distNew  = Math.min(age, SYNODIC - age);
+  const distFull = Math.abs(age - SYNODIC / 2);
+  if (distNew <= 3 || distFull <= 3) return 'spring';
+  const distQ1 = Math.abs(age - SYNODIC / 4);
+  const distQ3 = Math.abs(age - 3 * SYNODIC / 4);
+  if (distQ1 <= 3 || distQ3 <= 3) return 'neap';
+  return '';
+}
+
+function computeMoonWeeks(year) {
+  const moonWeeks = [];
+  for (let w = 1; w <= 52; w++) {
+    const monday = weekStartDate(year, w);
+    const midWeek = new Date(monday);
+    midWeek.setUTCDate(monday.getUTCDate() + 3);
+    const phase = getMoonPhase(midWeek);
+    let totalScore = 0, springDays = 0, neapDays = 0;
+    for (let d = 0; d < 7; d++) {
+      const day = new Date(monday);
+      day.setUTCDate(monday.getUTCDate() + d);
+      totalScore += getMoonPhase(day).primeScore;
+      const tide = getTideType(day);
+      if (tide === 'spring') springDays++;
+      if (tide === 'neap') neapDays++;
+    }
+    let tideType = '';
+    if (springDays >= 3) tideType = 'spring';
+    else if (neapDays >= 3) tideType = 'neap';
+    moonWeeks.push({ week: w, phase, avgMoonScore: totalScore / 7, tideType });
+  }
+  return moonWeeks;
+}
+
+// ── Fetch SST Data (NOAA ERDDAP) ──────────────────────────────
+function cToF(c) { return c * 9 / 5 + 32; }
+
+async function fetchSST(lat, lon, statusDiv) {
+  // Use Open-Meteo Marine API — fast, no auth, hourly SST
+  // Fetch 1 year per request in parallel (API caps ~8,760 rows per call)
+  const sstStartYear = 2015;
+  const sstEndYear = 2024;
+
+  if (statusDiv) statusDiv.innerHTML = `<span class="spinner"></span> Fetching SST data (${sstStartYear}\u2013${sstEndYear})...`;
+
+  const urls = [];
+  for (let y = sstStartYear; y <= sstEndYear; y++) {
+    urls.push(`https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}`
+      + `&hourly=sea_surface_temperature&start_date=${y}-01-01&end_date=${y}-12-31`
+      + `&timeformat=iso8601`);
+  }
+
+  // Fire all years in parallel
+  const results = await Promise.allSettled(urls.map(url =>
+    fetch(url).then(r => r.ok ? r.json() : null).catch(() => null)
+  ));
+
+  let allDates = [], allSST = [];
+  results.forEach(r => {
+    if (r.status !== 'fulfilled' || !r.value?.hourly) return;
+    const hourly = r.value.hourly;
+    const times = hourly.time || [];
+    const temps = hourly.sea_surface_temperature || [];
+    // Sample one reading per day (noon = index 12 of each day) to keep data lean
+    for (let i = 12; i < times.length; i += 24) {
+      if (temps[i] !== null && !isNaN(temps[i])) {
+        allDates.push(times[i].substring(0, 10));
+        allSST.push(temps[i]); // Celsius
+      }
+    }
+  });
+  return { dates: allDates, sst: allSST };
+}
+
+function processSST(rawSST) {
+  const buckets = {}; // week -> temps in °F
+  for (let i = 0; i < rawSST.dates.length; i++) {
+    const w = getISOWeek(rawSST.dates[i]);
+    if (w > 52) continue;
+    if (!buckets[w]) buckets[w] = [];
+    buckets[w].push(cToF(rawSST.sst[i]));
+  }
+
+  const sstWeeks = [];
+  for (let w = 1; w <= 52; w++) {
+    const temps = buckets[w];
+    if (!temps || temps.length === 0) {
+      sstWeeks.push({ week: w, avgF: null, minF: null, maxF: null, species: [] });
+      continue;
+    }
+    const avgF = temps.reduce((s, v) => s + v, 0) / temps.length;
+    const minF = Math.min(...temps);
+    const maxF = Math.max(...temps);
+
+    // Which species are in their optimal feeding range?
+    const species = [];
+    if (avgF >= SPECIES.bonefish.optimal[0] && avgF <= SPECIES.bonefish.optimal[1]) species.push('bonefish');
+    if (avgF >= SPECIES.tarpon.optimal[0] && avgF <= SPECIES.tarpon.optimal[1]) species.push('tarpon');
+    if (avgF >= SPECIES.permit.optimal[0] && avgF <= SPECIES.permit.optimal[1]) species.push('permit');
+    const grandSlam = species.length === 3;
+
+    sstWeeks.push({ week: w, avgF, minF, maxF, species, grandSlam });
+  }
+  return sstWeeks;
+}
+
+// ── Fetch Data (Wind + Pressure) ───────────────────────────────
+async function fetchData(lat, lon, startYear, endYear) {
+  const batchSize = 30;
+  let allDates = [], allWind = [], allGusts = [], allPressure = [];
+
+  for (let y = startYear; y <= endYear; y += batchSize) {
+    const yEnd = Math.min(y + batchSize - 1, endYear);
+    const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}`
+      + `&start_date=${y}-01-01&end_date=${yEnd}-12-31`
+      + `&daily=wind_speed_10m_max,wind_gusts_10m_max,surface_pressure_mean`
+      + `&wind_speed_unit=kmh&timezone=America%2FNassau`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`API error: ${resp.status} ${resp.statusText}`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.reason || data.error);
+    allDates.push(...(data.daily.time || []));
+    allWind.push(...(data.daily.wind_speed_10m_max || []));
+    allGusts.push(...(data.daily.wind_gusts_10m_max || []));
+    allPressure.push(...(data.daily.surface_pressure_mean || []));
+  }
+  return { dates: allDates, wind: allWind, gusts: allGusts, pressure: allPressure };
+}
+
+// ── Process Data ───────────────────────────────────────────────
+function processData(raw, thresholdKnots) {
+  const buckets = {}; // week -> { winds[], gusts[], pressures[], pressureSwings[] }
+
+  for (let i = 0; i < raw.dates.length; i++) {
+    const w = getISOWeek(raw.dates[i]);
+    if (w > 52) continue;
+    if (!buckets[w]) buckets[w] = { winds: [], gusts: [], pressures: [], pressureSwings: [] };
+
+    if (raw.wind[i] != null) {
+      buckets[w].winds.push(kmhToKnots(raw.wind[i]));
+    }
+    if (raw.gusts[i] != null) {
+      buckets[w].gusts.push(kmhToKnots(raw.gusts[i]));
+    }
+    if (raw.pressure[i] != null) {
+      buckets[w].pressures.push(raw.pressure[i]);
+      // Day-over-day pressure change (detect fronts)
+      if (i > 0 && raw.pressure[i - 1] != null) {
+        buckets[w].pressureSwings.push(Math.abs(raw.pressure[i] - raw.pressure[i - 1]));
+      }
+    }
+  }
+
+  const years = parseInt(endYearIn.value) - parseInt(startYearIn.value) + 1;
+  const weeks = [];
+  for (let w = 1; w <= 52; w++) {
+    const b = buckets[w];
+    if (!b || b.winds.length === 0) {
+      weeks.push({ week: w, avg: null, stddev: null, gustAvg: null, fishable: null,
+                    pressureAvg: null, pressureStdDev: null, pressureStability: null,
+                    frontsPerYear: null, n: 0 });
+      continue;
+    }
+    // Wind stats
+    const avg = b.winds.reduce((s, v) => s + v, 0) / b.winds.length;
+    const variance = b.winds.reduce((s, v) => s + (v - avg) ** 2, 0) / b.winds.length;
+    const stddev = Math.sqrt(variance);
+    const gustAvg = b.gusts.length > 0 ? b.gusts.reduce((s, v) => s + v, 0) / b.gusts.length : null;
+    const fishable = (b.winds.filter(v => v < thresholdKnots).length / b.winds.length) * 100;
+
+    // Pressure stats
+    let pressureAvg = null, pressureStdDev = null, pressureStability = null, frontsPerYear = null;
+    if (b.pressures.length > 0) {
+      pressureAvg = b.pressures.reduce((s, v) => s + v, 0) / b.pressures.length;
+      const pVar = b.pressures.reduce((s, v) => s + (v - pressureAvg) ** 2, 0) / b.pressures.length;
+      pressureStdDev = Math.sqrt(pVar);
+      // Stability = std dev of daily pressures within this week bucket (lower = more stable)
+      pressureStability = pressureStdDev;
+    }
+    if (b.pressureSwings.length > 0) {
+      // Count days where pressure dropped > 4 mb in 24h (frontal passage proxy)
+      const frontDays = b.pressureSwings.filter(s => s > 4).length;
+      frontsPerYear = frontDays / years;
+    }
+
+    weeks.push({ week: w, avg, stddev, gustAvg, fishable,
+                  pressureAvg, pressureStdDev, pressureStability, frontsPerYear, n: b.winds.length });
+  }
+
+  // Wind rank
+  const ranked = [...weeks].filter(w => w.avg !== null).sort((a, b) => a.avg - b.avg);
+  ranked.forEach((w, i) => w.rank = i + 1);
+  const rankMap = {};
+  ranked.forEach(w => rankMap[w.week] = w.rank);
+  weeks.forEach(w => w.rank = rankMap[w.week] || null);
+
+  return { weeks, ranked };
+}
+
+// ── Compute Fishing Scores (60/20/20) ──────────────────────────
+function computeFishingScores(weeks, moonWeeks) {
+  const valid = weeks.filter(w => w.avg !== null);
+  const minWind = Math.min(...valid.map(w => w.avg));
+  const maxWind = Math.max(...valid.map(w => w.avg));
+  const windRange = maxWind - minWind || 1;
+
+  // Pressure stability: lower std dev = better
+  const pressureVals = valid.filter(w => w.pressureStability !== null).map(w => w.pressureStability);
+  const minPStab = pressureVals.length > 0 ? Math.min(...pressureVals) : 0;
+  const maxPStab = pressureVals.length > 0 ? Math.max(...pressureVals) : 1;
+  const pRange = maxPStab - minPStab || 1;
+
+  return weeks.map(w => {
+    const mw = moonWeeks.find(m => m.week === w.week);
+    if (w.avg === null || !mw) {
+      return { ...w, moonPhase: mw?.phase, tideType: mw?.tideType || '',
+               fishingScore: null, moonScore: null, windScore: null, pressureScore: null };
+    }
+
+    const windScore = ((maxWind - w.avg) / windRange) * 100;
+    const moonScore = mw.avgMoonScore * 100;
+    // Pressure score: most stable = 100, least stable = 0
+    const pressureScore = w.pressureStability !== null
+      ? ((maxPStab - w.pressureStability) / pRange) * 100
+      : 50; // neutral if no data
+
+    // 60% wind + 20% moon + 20% pressure
+    const fishingScore = Math.round(windScore * 0.6 + moonScore * 0.2 + pressureScore * 0.2);
+
+    return {
+      ...w,
+      moonPhase: mw.phase, tideType: mw.tideType,
+      moonScore: Math.round(moonScore),
+      windScore: Math.round(windScore),
+      pressureScore: Math.round(pressureScore),
+      fishingScore
+    };
+  });
+}
+
+function scoreColor(score) {
+  if (score >= 80) return '#1a8a8a';
+  if (score >= 60) return '#2cb5b5';
+  if (score >= 40) return '#d4a843';
+  if (score >= 20) return '#e8734a';
+  return '#c0392b';
+}
+
+function stabilityLabel(stddev) {
+  if (stddev === null) return { text: '\u2014', cls: '' };
+  if (stddev < 3)  return { text: 'Stable', cls: 'stable' };
+  if (stddev < 5)  return { text: 'Moderate', cls: 'moderate' };
+  return { text: 'Unstable', cls: 'unstable' };
+}
+
+// ── Render Interpretation ──────────────────────────────────────
+function renderInterpretation(scoredWeeks, thresholdKnots, island, locName, startYear, endYear, tripYear) {
+  const panel = document.getElementById('interpretation');
+  const years = endYear - startYear + 1;
+
+  const valid = scoredWeeks.filter(w => w.avg !== null);
+  const belowThreshold = valid.filter(w => w.avg < thresholdKnots).sort((a, b) => a.week - b.week);
+  const byScore = [...valid].sort((a, b) => (b.fishingScore || 0) - (a.fishingScore || 0));
+  const primeWeeks = byScore.filter(w => w.fishingScore >= 75);
+
+  const overallAvg = valid.reduce((s,w) => s + w.avg, 0) / valid.length;
+
+  // Monthly summary
+  const monthAvgs = {};
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  valid.forEach(w => {
+    const approxDay = (w.week - 1) * 7 + 4;
+    const monthIdx = Math.min(11, Math.floor(approxDay / 30.44));
+    if (!monthAvgs[monthIdx]) monthAvgs[monthIdx] = [];
+    monthAvgs[monthIdx].push(w.avg);
+  });
+  const monthSummary = Object.entries(monthAvgs).map(([m, vals]) => ({
+    month: monthNames[parseInt(m)],
+    avg: vals.reduce((s,v) => s+v, 0) / vals.length
+  })).sort((a, b) => a.avg - b.avg);
+
+  // Pressure summary
+  const stableWeeks = valid.filter(w => w.pressureStability !== null && w.pressureStability < 3).sort((a,b) => a.pressureStability - b.pressureStability);
+  const unstableWeeks = valid.filter(w => w.pressureStability !== null && w.pressureStability >= 5).sort((a,b) => b.pressureStability - a.pressureStability);
+
+  // Consecutive calm stretches
+  const belowNums = belowThreshold.map(w => w.week);
+  const streaks = [];
+  if (belowNums.length > 0) {
+    let streak = [belowNums[0]];
+    for (let i = 1; i < belowNums.length; i++) {
+      if (belowNums[i] === belowNums[i - 1] + 1) streak.push(belowNums[i]);
+      else { if (streak.length >= 2) streaks.push([...streak]); streak = [belowNums[i]]; }
+    }
+    if (streak.length >= 2) streaks.push(streak);
+    streaks.sort((a, b) => b.length - a.length);
+  }
+
+  let html = `<h3>Wind, Pressure &amp; Moon Analysis: ${locName}, ${island}</h3>`;
+  html += `<p>Based on <strong>${years} years</strong> of daily wind &amp; pressure data (${startYear}\u2013${endYear}) combined with <strong>${tripYear} lunar phases</strong>.</p>`;
+
+  // Wind overview
+  html += `<p class="section-label">Wind Overview</p>`;
+  html += `<p>Annual avg max daily wind: <strong>${overallAvg.toFixed(1)} kts</strong>. `;
+  html += `Calmest month: <strong>${monthSummary[0].month}</strong> (${monthSummary[0].avg.toFixed(1)} kts). `;
+  html += `Windiest: <strong>${monthSummary[monthSummary.length-1].month}</strong> (${monthSummary[monthSummary.length-1].avg.toFixed(1)} kts).</p>`;
+
+  // Pressure overview
+  html += `<p class="section-label">Barometric Pressure Overview</p>`;
+  if (stableWeeks.length > 0) {
+    html += `<p><strong>${stableWeeks.length} weeks</strong> have historically stable pressure (std dev &lt; 3 mb), meaning fewer fronts and more consistent fishing. `;
+    html += `The most stable weeks are: `;
+    html += stableWeeks.slice(0, 5).map(w => `<span class="highlight-week">Wk ${w.week} (${weekDateRange(w.week)})</span>`).join(', ');
+    html += `.</p>`;
+  }
+  if (unstableWeeks.length > 0) {
+    html += `<p><strong>${unstableWeeks.length} weeks</strong> show high pressure volatility (std dev &gt; 5 mb) \u2014 frequent fronts. `;
+    html += `These can produce pre-front feeding windows but also blown-out days. Worst: `;
+    html += unstableWeeks.slice(0, 3).map(w => `<span class="caution">Wk ${w.week} (${weekDateRange(w.week)})</span>`).join(', ');
+    html += `.</p>`;
+  }
+
+  // SST overview
+  const sstValid = valid.filter(w => w.sstAvgF !== null);
+  if (sstValid.length > 0) {
+    html += `<p class="section-label">Water Temperature &amp; Species Activity</p>`;
+    const grandSlamWeeks = sstValid.filter(w => w.sstGrandSlam).sort((a,b) => a.week - b.week);
+    const bonefishWeeks = sstValid.filter(w => w.sstSpecies.includes('bonefish'));
+    const tarponWeeks = sstValid.filter(w => w.sstSpecies.includes('tarpon'));
+    const permitWeeks = sstValid.filter(w => w.sstSpecies.includes('permit'));
+    const coldWeeks = sstValid.filter(w => w.sstAvgF < 70);
+
+    html += `<p>Historical SST ranges from <strong>${Math.min(...sstValid.map(w=>w.sstAvgF)).toFixed(1)}\u00b0F</strong> (winter lows) to <strong>${Math.max(...sstValid.map(w=>w.sstAvgF)).toFixed(1)}\u00b0F</strong> (summer peaks).</p>`;
+
+    if (grandSlamWeeks.length > 0) {
+      html += `<p><strong>Grand Slam Zone (78\u201382\u00b0F, all 3 species optimal):</strong> `;
+      html += grandSlamWeeks.map(w => `<span class="prime-week">Wk ${w.week} (${weekDateRange(w.week)})</span>`).join(', ');
+      html += `.</p>`;
+    }
+    html += `<p>Optimal feeding weeks: <strong>Bonefish</strong> (78\u201382\u00b0F): ${bonefishWeeks.length} weeks. `;
+    html += `<strong>Tarpon</strong> (80\u201388\u00b0F): ${tarponWeeks.length} weeks. `;
+    html += `<strong>Permit</strong> (75\u201382\u00b0F): ${permitWeeks.length} weeks.</p>`;
+    if (coldWeeks.length > 0) {
+      html += `<p><span class="caution">${coldWeeks.length} weeks</span> average below 70\u00b0F \u2014 all species sluggish or off the flats.</p>`;
+    }
+  }
+
+  // Weeks below threshold
+  html += `<p class="section-label">Weeks Below ${thresholdKnots} Knots</p>`;
+  if (belowThreshold.length === 0) {
+    html += `<p><span class="caution">No weeks</span> average below ${thresholdKnots} kts. Consider raising the threshold.</p>`;
+  } else {
+    html += `<p><strong>${belowThreshold.length} of 52 weeks</strong> average below ${thresholdKnots} knots:</p><ul>`;
+    belowThreshold.forEach(w => {
+      const stab = stabilityLabel(w.pressureStability);
+      const tideNote = w.tideType === 'spring' ? ', Spring tide' : w.tideType === 'neap' ? ', Neap tide' : '';
+      html += `<li><span class="highlight-week">Wk ${w.week} (${weekDateRange(w.week)})</span> \u2014 ${w.avg.toFixed(1)} kts, ${w.fishable.toFixed(0)}% fishable, ${stab.text} pressure, ${w.moonPhase.icon} ${w.moonPhase.shortName}${tideNote}</li>`;
+    });
+    html += `</ul>`;
+  }
+
+  // Calm streaks
+  if (streaks.length > 0) {
+    html += `<p class="section-label">Best Consecutive Calm Windows</p><ul>`;
+    streaks.forEach(s => {
+      const avgWind = valid.filter(w => w.week >= s[0] && w.week <= s[s.length-1]).reduce((sum, w) => sum + w.avg, 0) / s.length;
+      html += `<li><strong>Weeks ${s[0]}\u2013${s[s.length-1]}</strong> (${weekDateRange(s[0])} through ${weekDateRange(s[s.length-1]).split('\u2013')[1]}) \u2014 ${s.length} weeks, ${avgWind.toFixed(1)} kts avg</li>`;
+    });
+    html += `</ul>`;
+  }
+
+  // Prime weeks
+  html += `<p class="section-label">${tripYear} Trip Planning \u2014 Prime Weeks (Score \u2265 75)</p>`;
+  if (primeWeeks.length === 0) {
+    html += `<p>No weeks score above 75. Best options:</p><ul>`;
+    byScore.slice(0, 5).forEach(w => {
+      const stab = stabilityLabel(w.pressureStability);
+      html += `<li><span class="highlight-week">Wk ${w.week} (${weekDateRange(w.week)})</span> \u2014 Score ${w.fishingScore}, ${w.avg.toFixed(1)} kts, ${stab.text} pressure, ${w.moonPhase.icon} ${w.moonPhase.shortName}, ${w.tideType || 'transitional'}</li>`;
+    });
+    html += `</ul>`;
+  } else {
+    html += `<p><strong>${primeWeeks.length} prime weeks</strong> where calm wind, stable pressure, and favorable moon align in ${tripYear}:</p><ul>`;
+    primeWeeks.forEach(w => {
+      const stab = stabilityLabel(w.pressureStability);
+      html += `<li><span class="prime-week">Wk ${w.week} (${weekDateRange(w.week)}) \u2014 Score ${w.fishingScore}</span> \u2014 ${w.avg.toFixed(1)} kts, ${stab.text} pressure, ${w.moonPhase.icon} ${w.moonPhase.shortName}, ${w.tideType === 'spring' ? 'Spring tide' : w.tideType === 'neap' ? 'Neap tide' : 'transitional'}</li>`;
+    });
+    html += `</ul>`;
+  }
+
+  // Top rec
+  const best = byScore[0];
+  const bestStab = stabilityLabel(best.pressureStability);
+  html += `<p class="section-label">Top Recommendation for ${tripYear}</p>`;
+  html += `<p>Best week: <span class="prime-week">Wk ${best.week} (${weekDateRange(best.week)}) \u2014 Score ${best.fishingScore}</span> with `;
+  html += `<strong>${best.avg.toFixed(1)} kts</strong> wind (${knotsToMph(best.avg).toFixed(1)} mph), `;
+  html += `${bestStab.text.toLowerCase()} pressure, `;
+  html += `${best.moonPhase.icon} ${best.moonPhase.name}, ${best.tideType === 'spring' ? 'spring' : best.tideType === 'neap' ? 'neap' : 'transitional'} tides. `;
+  html += `<strong>${best.fishable.toFixed(0)}%</strong> of days historically below ${thresholdKnots} kts.`;
+  if (best.sstAvgF) {
+    html += ` Water temp: <strong>${best.sstAvgF.toFixed(1)}\u00b0F</strong>`;
+    if (best.sstGrandSlam) html += ` (Grand Slam zone!)`;
+    else if (best.sstSpecies?.length > 0) html += ` (optimal for ${best.sstSpecies.map(s=>SPECIES[s].name).join(', ')})`;
+    html += `.`;
+  }
+  html += `</p>`;
+
+  // Avoid
+  html += `<p class="section-label">Weeks to Avoid</p>`;
+  const worst5 = byScore.slice(-5).reverse();
+  html += `<p>`;
+  html += worst5.map(w => `<span class="caution">Wk ${w.week} (${weekDateRange(w.week)}, ${w.avg.toFixed(1)} kts, score ${w.fishingScore})</span>`).join(', ');
+  html += `.</p>`;
+
+  // Method
+  html += `<p class="section-label">Scoring Method</p>`;
+  html += `<p style="font-size:0.8rem;color:var(--gray-600)">Fishing Score = <strong>60% wind</strong> (calmest = 100) + <strong>20% moon/tide</strong> (new/full = 100, quarter = 20) + <strong>20% pressure stability</strong> (lowest std dev = 100). Spring tides push water across flats. Stable high pressure = consistent fishing; falling pressure = pre-front bite then lockjaw.</p>`;
+
+  panel.innerHTML = html;
+}
+
+// ── Render Top-5 Cards ─────────────────────────────────────────
+function renderTop5(scoredByScore) {
+  top5Cont.innerHTML = '';
+  scoredByScore.slice(0, 5).forEach((w, i) => {
+    const card = document.createElement('div');
+    card.className = 'top5-card' + (i === 0 ? ' rank-1' : '');
+    const sc = scoreColor(w.fishingScore);
+    const stab = stabilityLabel(w.pressureStability);
+    card.innerHTML = `
+      <div class="rank">#${i + 1} Best Fishing Week</div>
+      <div class="dates">Week ${w.week}: ${weekDateRange(w.week)}</div>
+      <div class="wind">${w.avg.toFixed(1)} kts wind &middot; ${w.moonPhase.icon} ${w.moonPhase.shortName}</div>
+      <div class="extra">${w.sstAvgF ? w.sstAvgF.toFixed(0) + '\u00b0F' : ''} ${w.sstGrandSlam ? 'Grand Slam!' : w.sstSpecies?.length > 0 ? w.sstSpecies.map(s=>SPECIES[s].name).join('+') : ''}</div>
+      <div class="extra">${stab.text} pressure &middot; ${w.tideType === 'spring' ? 'Spring' : w.tideType === 'neap' ? 'Neap' : 'Trans.'} tide &middot; ${w.fishable.toFixed(0)}% fishable</div>
+      <div class="score-badge" style="background:${sc};color:#fff">Score: ${w.fishingScore}</div>
+    `;
+    top5Cont.appendChild(card);
+  });
+}
+
+// ── Render Moon Strip ──────────────────────────────────────────
+function renderMoonStrip(scoredWeeks, tripYear) {
+  const container = document.getElementById('moonStripContainer');
+  let html = `<h4>${tripYear} Moon Phases &amp; Tides by Week</h4><div class="strip-row">`;
+  scoredWeeks.forEach(w => {
+    if (!w.moonPhase) return;
+    const tideClass = w.tideType === 'spring' ? 'tide-spring' : w.tideType === 'neap' ? 'tide-neap' : '';
+    const tideLabel = w.tideType === 'spring' ? 'Spring' : w.tideType === 'neap' ? 'Neap' : '';
+    html += `<div class="moon-cell" title="Week ${w.week}: ${w.moonPhase.name}${w.tideType ? ', ' + w.tideType + ' tide' : ''}">
+      <div class="moon-icon">${w.moonPhase.icon}</div>
+      <div class="moon-label">Wk${w.week}</div>
+      ${tideLabel ? `<div class="tide-label ${tideClass}">${tideLabel}</div>` : '<div class="tide-label">&nbsp;</div>'}
+    </div>`;
+  });
+  html += `</div>`;
+  container.innerHTML = html;
+}
+
+// ── Render Wind Chart ──────────────────────────────────────────
+function renderWindChart(scoredWeeks, thresholdKnots) {
+  const ctx = document.getElementById('windChart').getContext('2d');
+  if (windChart) windChart.destroy();
+
+  const labels = scoredWeeks.map(w => `Wk ${w.week}`);
+  const avgs = scoredWeeks.map(w => w.avg);
+  const colors = scoredWeeks.map(w => {
+    if (w.fishingScore === null) return 'rgba(200,200,200,0.5)';
+    if (w.fishingScore >= 75) return 'rgba(26,138,138,0.85)';
+    if (w.fishingScore >= 50) return 'rgba(44,181,181,0.7)';
+    if (w.fishingScore >= 25) return 'rgba(212,168,67,0.7)';
+    return 'rgba(232,115,74,0.7)';
+  });
+
+  windChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ label: 'Avg Daily Max Wind (knots)', data: avgs, backgroundColor: colors, borderRadius: 3 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => { const w = scoredWeeks[items[0].dataIndex]; return `Week ${w.week}: ${weekDateRange(w.week)}`; },
+            label: (item) => {
+              const w = scoredWeeks[item.dataIndex];
+              const lines = [
+                `Avg Wind: ${w.avg?.toFixed(1)} kts (${knotsToMph(w.avg).toFixed(1)} mph)`,
+                `Avg Gust: ${w.gustAvg?.toFixed(1) || 'N/A'} kts`,
+                `Fishable: ${w.fishable?.toFixed(0)}%`,
+                `Pressure Stability: ${w.pressureStability?.toFixed(1) ?? 'N/A'} mb std dev`,
+                `Fronts/Year: ${w.frontsPerYear?.toFixed(1) ?? 'N/A'}`,
+                `Score: ${w.fishingScore}`
+              ];
+              return lines;
+            }
+          }
+        },
+        annotation: {
+          annotations: {
+            thresholdLine: {
+              type: 'line', yMin: thresholdKnots, yMax: thresholdKnots,
+              borderColor: 'rgba(232,115,74,0.8)', borderWidth: 2, borderDash: [6, 4],
+              label: { display: true, content: `${thresholdKnots} kts`, position: 'end', backgroundColor: 'rgba(232,115,74,0.85)', color: '#fff', font: { size: 11 } }
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { maxRotation: 90, font: { size: 10 }, callback: function(v, i) { return i % 4 === 0 ? this.getLabelForValue(v) : ''; } }, grid: { display: false } },
+        y: { beginAtZero: true, title: { display: true, text: 'Wind Speed (knots)', font: { size: 12 } } }
+      }
+    }
+  });
+}
+
+// ── Render Pressure Chart ──────────────────────────────────────
+function renderPressureChart(scoredWeeks) {
+  const ctx = document.getElementById('pressureChart').getContext('2d');
+  if (pressureChart) pressureChart.destroy();
+
+  const labels = scoredWeeks.map(w => `Wk ${w.week}`);
+  const stability = scoredWeeks.map(w => w.pressureStability);
+  const fronts = scoredWeeks.map(w => w.frontsPerYear);
+
+  const stabColors = scoredWeeks.map(w => {
+    if (w.pressureStability === null) return 'rgba(200,200,200,0.5)';
+    if (w.pressureStability < 3) return 'rgba(26,138,138,0.75)';
+    if (w.pressureStability < 5) return 'rgba(212,168,67,0.7)';
+    return 'rgba(232,115,74,0.75)';
+  });
+
+  pressureChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Pressure Std Dev (mb)',
+          data: stability,
+          backgroundColor: stabColors,
+          borderRadius: 3,
+          yAxisID: 'y',
+          order: 2
+        },
+        {
+          label: 'Fronts per Year (>4mb/day)',
+          data: fronts,
+          type: 'line',
+          borderColor: 'rgba(124,92,191,0.8)',
+          backgroundColor: 'rgba(124,92,191,0.1)',
+          pointRadius: 2,
+          pointBackgroundColor: 'rgba(124,92,191,0.8)',
+          borderWidth: 2,
+          fill: true,
+          yAxisID: 'y1',
+          order: 1
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'top', labels: { font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            title: (items) => { const w = scoredWeeks[items[0].dataIndex]; return `Week ${w.week}: ${weekDateRange(w.week)}`; },
+            label: (item) => {
+              const w = scoredWeeks[item.dataIndex];
+              if (item.datasetIndex === 0) {
+                const stab = stabilityLabel(w.pressureStability);
+                return `Pressure Std Dev: ${w.pressureStability?.toFixed(1) ?? 'N/A'} mb (${stab.text})`;
+              }
+              return `Fronts/Year: ${w.frontsPerYear?.toFixed(1) ?? 'N/A'} (days with >4mb swing)`;
+            }
+          }
+        },
+        annotation: {
+          annotations: {
+            stableLine: {
+              type: 'line', yMin: 3, yMax: 3, yScaleID: 'y',
+              borderColor: 'rgba(26,138,138,0.5)', borderWidth: 1.5, borderDash: [4, 3],
+              label: { display: true, content: 'Stable < 3mb', position: 'start', backgroundColor: 'rgba(26,138,138,0.7)', color: '#fff', font: { size: 10 } }
+            },
+            unstableLine: {
+              type: 'line', yMin: 5, yMax: 5, yScaleID: 'y',
+              borderColor: 'rgba(232,115,74,0.5)', borderWidth: 1.5, borderDash: [4, 3],
+              label: { display: true, content: 'Unstable > 5mb', position: 'end', backgroundColor: 'rgba(232,115,74,0.7)', color: '#fff', font: { size: 10 } }
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { maxRotation: 90, font: { size: 10 }, callback: function(v, i) { return i % 4 === 0 ? this.getLabelForValue(v) : ''; } }, grid: { display: false } },
+        y: { beginAtZero: true, position: 'left', title: { display: true, text: 'Pressure Std Dev (mb)', font: { size: 12 } } },
+        y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Fronts per Year', font: { size: 12 } } }
+      }
+    }
+  });
+}
+
+// ── Render SST Chart ───────────────────────────────────────────
+function renderSSTChart(sstWeeks) {
+  const ctx = document.getElementById('sstChart').getContext('2d');
+  if (sstChart) sstChart.destroy();
+
+  const labels = sstWeeks.map(w => `Wk ${w.week}`);
+  const avgs = sstWeeks.map(w => w.avgF);
+
+  // Color by grand slam zone
+  const colors = sstWeeks.map(w => {
+    if (w.avgF === null) return 'rgba(200,200,200,0.5)';
+    if (w.grandSlam) return 'rgba(212,168,67,0.85)';
+    if (w.species.length >= 2) return 'rgba(26,138,138,0.75)';
+    if (w.species.length === 1) return 'rgba(44,181,181,0.6)';
+    return 'rgba(200,200,200,0.5)';
+  });
+
+  sstChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ label: 'Avg SST (°F)', data: avgs, backgroundColor: colors, borderRadius: 3 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => { const w = sstWeeks[items[0].dataIndex]; return `Week ${w.week}: ${weekDateRange(w.week)}`; },
+            label: (item) => {
+              const w = sstWeeks[item.dataIndex];
+              const lines = [`Avg SST: ${w.avgF?.toFixed(1)}°F (${((w.avgF - 32) * 5/9).toFixed(1)}°C)`];
+              lines.push(`Range: ${w.minF?.toFixed(1)}°F \u2013 ${w.maxF?.toFixed(1)}°F`);
+              if (w.grandSlam) lines.push('GRAND SLAM ZONE - All 3 species optimal');
+              else if (w.species.length > 0) lines.push(`Optimal for: ${w.species.map(s => SPECIES[s].name).join(', ')}`);
+              else lines.push('Outside optimal feeding range for all species');
+              return lines;
+            }
+          }
+        },
+        annotation: {
+          annotations: {
+            grandSlamZone: {
+              type: 'box', yMin: GRAND_SLAM[0], yMax: GRAND_SLAM[1],
+              backgroundColor: 'rgba(212,168,67,0.08)', borderColor: 'rgba(212,168,67,0.3)', borderWidth: 1,
+              label: { display: true, content: 'Grand Slam Zone (78-82°F)', position: 'start',
+                       backgroundColor: 'rgba(212,168,67,0.85)', color: '#fff', font: { size: 10 } }
+            },
+            bonefishLow: {
+              type: 'line', yMin: SPECIES.bonefish.optimal[0], yMax: SPECIES.bonefish.optimal[0],
+              borderColor: 'rgba(26,138,138,0.4)', borderWidth: 1, borderDash: [3, 3]
+            },
+            tarponHigh: {
+              type: 'line', yMin: SPECIES.tarpon.optimal[1], yMax: SPECIES.tarpon.optimal[1],
+              borderColor: 'rgba(124,92,191,0.4)', borderWidth: 1, borderDash: [3, 3],
+              label: { display: true, content: 'Tarpon upper optimal (88°F)', position: 'end',
+                       backgroundColor: 'rgba(124,92,191,0.7)', color: '#fff', font: { size: 9 } }
+            },
+            permitLow: {
+              type: 'line', yMin: SPECIES.permit.optimal[0], yMax: SPECIES.permit.optimal[0],
+              borderColor: 'rgba(212,168,67,0.4)', borderWidth: 1, borderDash: [3, 3],
+              label: { display: true, content: 'Permit lower optimal (75°F)', position: 'start',
+                       backgroundColor: 'rgba(212,168,67,0.7)', color: '#fff', font: { size: 9 } }
+            },
+            shutdown: {
+              type: 'line', yMin: 70, yMax: 70,
+              borderColor: 'rgba(232,115,74,0.6)', borderWidth: 2, borderDash: [6, 4],
+              label: { display: true, content: '70°F - Sluggish/Shutdown', position: 'end',
+                       backgroundColor: 'rgba(232,115,74,0.85)', color: '#fff', font: { size: 10 } }
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { maxRotation: 90, font: { size: 10 }, callback: function(v, i) { return i % 4 === 0 ? this.getLabelForValue(v) : ''; } }, grid: { display: false } },
+        y: { title: { display: true, text: 'Sea Surface Temperature (°F)', font: { size: 12 } },
+             min: 65, suggestedMax: 90 }
+      }
+    }
+  });
+}
+
+// ── Render Table ───────────────────────────────────────────────
+function renderTable(data) {
+  tbody.innerHTML = '';
+  data.forEach(w => {
+    const tr = document.createElement('tr');
+    if (w.fishingScore >= 75) tr.className = 'prime-row';
+    else if (w.rank <= 5) tr.className = 'top5-row';
+    const barWidth = Math.min(w.fishable || 0, 100);
+    const sc = w.fishingScore !== null ? scoreColor(w.fishingScore) : '#ccc';
+    const tideHtml = w.tideType === 'spring'
+      ? '<span class="tide-badge spring">Spring</span>'
+      : w.tideType === 'neap'
+      ? '<span class="tide-badge neap">Neap</span>'
+      : '<span style="color:#aaa;font-size:0.72rem">\u2014</span>';
+    const stab = stabilityLabel(w.pressureStability);
+    const stabHtml = stab.cls
+      ? `<span class="pressure-badge ${stab.cls}">${stab.text}</span>`
+      : '\u2014';
+
+    tr.innerHTML = `
+      <td>${w.fishingScore !== null ? `<span class="score-sm" style="background:${sc}">${w.fishingScore}</span>` : '\u2014'}</td>
+      <td>${w.rank ?? '\u2014'}</td>
+      <td>${w.week}</td>
+      <td>${weekDateRange(w.week)}</td>
+      <td>${w.avg?.toFixed(1) ?? '\u2014'}</td>
+      <td>${w.gustAvg?.toFixed(1) ?? '\u2014'}</td>
+      <td><span class="fishable-bar" style="width:${barWidth * 0.8}px"></span>${w.fishable?.toFixed(0) ?? '\u2014'}%</td>
+      <td>${stabHtml}</td>
+      <td>${w.frontsPerYear?.toFixed(1) ?? '\u2014'}</td>
+      <td>${w.sstAvgF ? w.sstAvgF.toFixed(1) + '\u00b0' : '\u2014'}</td>
+      <td>${w.sstSpecies && w.sstSpecies.length > 0
+        ? (w.sstGrandSlam
+          ? '<span class="species-badge slam">SLAM</span>'
+          : w.sstSpecies.map(s => `<span class="species-badge ${SPECIES[s].cls}">${SPECIES[s].short}</span>`).join(''))
+        : '<span style="color:#aaa;font-size:0.72rem">\u2014</span>'}</td>
+      <td>${w.moonPhase ? w.moonPhase.icon + ' ' + w.moonPhase.shortName : '\u2014'}</td>
+      <td>${tideHtml}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ── Table Sorting ──────────────────────────────────────────────
+let currentSort = { col: 'score', asc: false };
+let lastScored = [];
+
+document.querySelectorAll('#weekTable thead th').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    if (currentSort.col === col) currentSort.asc = !currentSort.asc;
+    else currentSort = { col, asc: col === 'score' ? false : true };
+    sortAndRender();
+  });
+});
+
+function sortAndRender() {
+  const col = currentSort.col;
+  const asc = currentSort.asc;
+  const keyMap = {
+    score: 'fishingScore', rank: 'rank', week: 'week', dates: 'week',
+    avg: 'avg', gust: 'gustAvg', fishable: 'fishable',
+    pressureStability: 'pressureStability', fronts: 'frontsPerYear',
+    sst: 'sstAvgF', species: 'sstSpeciesCount',
+    moon: 'moonScore', tide: 'tideType'
+  };
+  const key = keyMap[col];
+
+  const sorted = [...lastScored].sort((a, b) => {
+    let va = a[key], vb = b[key];
+    if (key === 'tideType') {
+      const order = { spring: 0, neap: 1, '': 2 };
+      va = order[va ?? ''] ?? 2; vb = order[vb ?? ''] ?? 2;
+    }
+    va = va ?? (asc ? 999 : -1);
+    vb = vb ?? (asc ? 999 : -1);
+    return asc ? va - vb : vb - va;
+  });
+
+  document.querySelectorAll('#weekTable thead th .sort-arrow').forEach(s => s.textContent = '');
+  const activeTh = document.querySelector(`#weekTable thead th[data-col="${col}"] .sort-arrow`);
+  if (activeTh) activeTh.textContent = asc ? '\u25B2' : '\u25BC';
+  renderTable(sorted);
+}
+
+// ── Main Action ────────────────────────────────────────────────
+analyzeBtn.addEventListener('click', async () => {
+  const locData = JSON.parse(locationSel.value);
+  const startYear = parseInt(startYearIn.value);
+  const endYear = parseInt(endYearIn.value);
+  const thresholdKnots = parseFloat(thresholdIn.value) || 12;
+  const tripYear = parseInt(tripYearSel.value);
+  const island = islandSel.value;
+  const locName = locationSel.options[locationSel.selectedIndex].text;
+
+  const wantWind = toggleWind.checked;
+  const wantSST  = toggleSST.checked;
+  const wantMoon = toggleMoon.checked;
+
+  if (!wantWind && !wantSST && !wantMoon) {
+    statusDiv.textContent = 'Enable at least one data layer.';
+    statusDiv.className = 'error'; return;
+  }
+  if (wantWind && startYear >= endYear) {
+    statusDiv.textContent = 'Start year must be before end year.';
+    statusDiv.className = 'error'; return;
+  }
+
+  analyzeBtn.disabled = true;
+  resultsDiv.style.display = 'none';
+  statusDiv.style.display = 'block';
+  statusDiv.className = '';
+
+  const layers = [];
+  if (wantWind) layers.push('Wind & Pressure');
+  if (wantSST) layers.push('Water Temp');
+  if (wantMoon) layers.push('Moon & Tides');
+  statusDiv.innerHTML = `<span class="spinner"></span> Fetching ${layers.join(' + ')} for ${island}...`;
+
+  try {
+    // Fire enabled fetches in parallel
+    const fetchPromises = {};
+    if (wantWind) fetchPromises.wind = fetchData(locData.lat, locData.lon, startYear, endYear);
+    if (wantSST)  fetchPromises.sst  = fetchSST(locData.lat, locData.lon, statusDiv);
+
+    const results = {};
+    const keys = Object.keys(fetchPromises);
+    const values = await Promise.all(Object.values(fetchPromises));
+    keys.forEach((k, i) => results[k] = values[i]);
+
+    statusDiv.innerHTML = `<span class="spinner"></span> Processing data...`;
+    await new Promise(r => setTimeout(r, 50));
+
+    // Process wind
+    let weeks = null;
+    if (wantWind && results.wind) {
+      const processed = processData(results.wind, thresholdKnots);
+      weeks = processed.weeks;
+    } else {
+      // Create empty week shells for moon/SST-only mode
+      weeks = [];
+      for (let w = 1; w <= 52; w++) {
+        weeks.push({ week: w, avg: null, stddev: null, gustAvg: null, fishable: null,
+                      pressureAvg: null, pressureStdDev: null, pressureStability: null,
+                      frontsPerYear: null, rank: null, n: 0 });
+      }
+    }
+
+    // Process moon
+    const moonWeeks = wantMoon ? computeMoonWeeks(tripYear) : [];
+
+    // Process SST
+    let sstWeeks = [];
+    if (wantSST && results.sst) {
+      sstWeeks = processSST(results.sst);
+    }
+
+    // Compute fishing scores (works with whatever data is available)
+    const scoredWeeks = wantWind && wantMoon
+      ? computeFishingScores(weeks, moonWeeks)
+      : weeks.map(w => {
+          const mw = moonWeeks.find(m => m.week === w.week);
+          return { ...w, moonPhase: mw?.phase || null, tideType: mw?.tideType || '',
+                   fishingScore: w.avg !== null ? w.rank : null,
+                   moonScore: mw ? Math.round(mw.avgMoonScore * 100) : null,
+                   windScore: null, pressureScore: null };
+        });
+
+    // Merge SST
+    scoredWeeks.forEach(w => {
+      const sst = sstWeeks.find(s => s.week === w.week);
+      w.sstAvgF = sst?.avgF ?? null;
+      w.sstMinF = sst?.minF ?? null;
+      w.sstMaxF = sst?.maxF ?? null;
+      w.sstSpecies = sst?.species ?? [];
+      w.sstGrandSlam = sst?.grandSlam ?? false;
+      w.sstSpeciesCount = sst?.species?.length ?? 0;
+    });
+
+    // Sort: by fishing score if available, else by week
+    let scoredByScore;
+    if (wantWind) {
+      scoredByScore = [...scoredWeeks].filter(w => w.fishingScore !== null).sort((a, b) => b.fishingScore - a.fishingScore);
+    } else {
+      scoredByScore = [...scoredWeeks].sort((a, b) => a.week - b.week);
+    }
+    lastScored = scoredByScore;
+
+    // Show/hide sections
+    document.getElementById('windSection').style.display = wantWind ? '' : 'none';
+    document.getElementById('sstSection').style.display = wantSST ? '' : 'none';
+    document.getElementById('moonSection').style.display = wantMoon ? '' : 'none';
+
+    // Render enabled layers
+    renderInterpretation(scoredWeeks, thresholdKnots, island, locName, startYear, endYear, tripYear);
+    if (wantWind) {
+      renderTop5(scoredByScore);
+      renderWindChart(scoredWeeks, thresholdKnots);
+      renderPressureChart(scoredWeeks);
+    } else {
+      top5Cont.innerHTML = '';
+    }
+    if (wantSST && sstWeeks.length > 0) renderSSTChart(sstWeeks);
+    if (wantMoon) renderMoonStrip(scoredWeeks, tripYear);
+
+    // Table
+    const titleParts = [];
+    if (wantWind) titleParts.push('Wind/Pressure');
+    if (wantSST) titleParts.push('Water Temp');
+    if (wantMoon) titleParts.push(`${tripYear} Moon/Tide`);
+    document.getElementById('tableTitle').textContent = `All 52 Weeks \u2014 ${titleParts.join(' + ')}`;
+
+    currentSort = wantWind ? { col: 'score', asc: false } : { col: 'week', asc: true };
+    document.querySelectorAll('#weekTable thead th .sort-arrow').forEach(s => s.textContent = '');
+    const defaultArrow = document.querySelector(`#weekTable thead th[data-col="${currentSort.col}"] .sort-arrow`);
+    if (defaultArrow) defaultArrow.textContent = currentSort.asc ? '\u25B2' : '\u25BC';
+    renderTable(scoredByScore);
+
+    statusDiv.style.display = 'none';
+    resultsDiv.style.display = 'block';
+  } catch (err) {
+    statusDiv.className = 'error';
+    statusDiv.textContent = `Error: ${err.message}`;
+    console.error(err);
+  } finally {
+    analyzeBtn.disabled = false;
+  }
+});
+
+// ── Music Toggle ──────────────────────────────────────────────
+function ytSrc(videoId) {
+  return `https://www.youtube.com/embed/${videoId}?autoplay=1&loop=1&playlist=${videoId}&controls=0&showinfo=0&modestbranding=1&rel=0`;
+}
+let musicPlaying = false;
+const stationPicker = document.getElementById('stationPicker');
+
+document.getElementById('musicPlayer').addEventListener('click', () => {
+  const iframe = document.getElementById('ytPlayer');
+  const icon = document.getElementById('musicIcon');
+  const label = document.getElementById('musicLabel');
+  if (musicPlaying) {
+    iframe.src = '';
+    icon.textContent = '\uD83C\uDFB5';
+    label.textContent = 'Play';
+    musicPlaying = false;
+  } else {
+    iframe.src = ytSrc(stationPicker.value);
+    icon.textContent = '\uD83D\uDD0A';
+    label.textContent = 'Playing';
+    musicPlaying = true;
+  }
+});
+
+// Switch station while playing
+stationPicker.addEventListener('change', () => {
+  if (musicPlaying) {
+    document.getElementById('ytPlayer').src = ytSrc(stationPicker.value);
+  }
+});
+
+// Register service worker for PWA
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+
+</body>
+</html>
