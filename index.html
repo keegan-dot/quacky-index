@@ -611,20 +611,21 @@ function computeMoonWeeks(year) {
 function cToF(c) { return c * 9 / 5 + 32; }
 
 async function fetchSST(lat, lon, statusDiv) {
-  // Use Open-Meteo Marine API — fast, no auth, hourly SST
+  // Use Open-Meteo Marine API — daily-mean SST (one value/day; ~24x leaner than hourly).
   // Single request for the full range; parallel per-year calls trip the free-tier 429.
   const sstStartYear = 2015;
   const sstEndYear = 2024;
 
-  const cacheKey = `quacky:sst:${lat.toFixed(3)}:${lon.toFixed(3)}:${sstStartYear}-${sstEndYear}`;
+  // 'sstd' namespace = daily-mean series; keeps old hourly-noon cache entries from being reused.
+  const cacheKey = `quacky:sstd:${lat.toFixed(3)}:${lon.toFixed(3)}:${sstStartYear}-${sstEndYear}`;
   const cached = cacheGet(cacheKey);
   if (cached) return cached;
 
   if (statusDiv) statusDiv.innerHTML = `<span class="spinner"></span> Fetching SST data (${sstStartYear}\u2013${sstEndYear})...`;
 
   const url = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}`
-    + `&hourly=sea_surface_temperature&start_date=${sstStartYear}-01-01&end_date=${sstEndYear}-12-31`
-    + `&timeformat=iso8601`;
+    + `&daily=sea_surface_temperature_mean&start_date=${sstStartYear}-01-01&end_date=${sstEndYear}-12-31`
+    + `&timezone=America%2FNassau&timeformat=iso8601`;
 
   let data = null;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -637,15 +638,14 @@ async function fetchSST(lat, lon, statusDiv) {
   }
 
   const allDates = [], allSST = [];
-  const hourly = data?.hourly;
-  if (hourly) {
-    const times = hourly.time || [];
-    const temps = hourly.sea_surface_temperature || [];
-    // Sample one reading per day (noon = index 12 of each day) to keep data lean
-    for (let i = 12; i < times.length; i += 24) {
+  const daily = data?.daily;
+  if (daily) {
+    const times = daily.time || [];
+    const temps = daily.sea_surface_temperature_mean || [];
+    for (let i = 0; i < times.length; i++) {
       if (temps[i] !== null && !isNaN(temps[i])) {
-        allDates.push(times[i].substring(0, 10));
-        allSST.push(temps[i]); // Celsius
+        allDates.push(times[i]); // already YYYY-MM-DD
+        allSST.push(temps[i]);   // Celsius, daily mean
       }
     }
   }
