@@ -1401,7 +1401,15 @@ function sortAndRender() {
 
 // ── Main Action ────────────────────────────────────────────────
 analyzeBtn.addEventListener('click', async () => {
-  const locData = JSON.parse(locationSel.value);
+  let locData;
+  try {
+    locData = JSON.parse(locationSel.value);
+  } catch {
+    statusDiv.style.display = 'block';
+    statusDiv.className = 'error';
+    statusDiv.textContent = 'Select an island and location first.';
+    return;
+  }
   const startYear = parseInt(startYearIn.value);
   const endYear = parseInt(endYearIn.value);
   const thresholdKnots = parseFloat(thresholdIn.value) || 12;
